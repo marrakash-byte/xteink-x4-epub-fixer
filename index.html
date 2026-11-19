@@ -23,6 +23,10 @@
   li small { display:block; color:var(--mut); }
   a.btn { background:var(--acc); color:#fff; text-decoration:none; padding:9px 16px; border-radius:9px; font-weight:600; }
   .err { color:#c62828; }
+  .opts { margin:16px 0 0; display:grid; gap:8px; }
+  .opts label { background:var(--card); border-radius:12px; padding:10px 14px; display:block; cursor:pointer; }
+  .opts input { transform:scale(1.2); margin-right:6px; }
+  .opts span { color:var(--mut); font-size:.85rem; }
   details { margin-top:28px; color:var(--mut); font-size:.92rem; }
   summary { cursor:pointer; }
   footer { margin-top:28px; font-size:.85rem; color:var(--mut); }
@@ -31,7 +35,7 @@
 <body>
 <main>
   <h1>📖 Sistema EPUB per Xteink X4</h1>
-  <p class="sub">Toglie il testo giustificato e i buchi tra le parole. Tutto avviene nel tuo browser: il libro non viene caricato da nessuna parte.</p>
+  <p class="sub">Sistema l’EPUB per il lettore: sillabazione italiana, niente font dell’editore, spazi puliti. Tutto avviene nel tuo browser: il libro non viene caricato da nessuna parte.</p>
 
   <label id="drop" for="file">
     <strong>Trascina qui il tuo EPUB</strong>
@@ -39,22 +43,29 @@
   </label>
   <input id="file" type="file" accept=".epub,application/epub+zip" multiple>
 
+  <div class="opts">
+    <label><input type="checkbox" id="optHyph" checked> <b>Sillabazione italiana</b> <span>(spezza le parole a fine riga con il trattino: il testo giustificato non crea più buchi grandi)</span></label>
+    <label><input type="checkbox" id="optLeft"> Forza testo allineato a sinistra <span>(senza giustificazione)</span></label>
+  </div>
+
   <ul id="list"></ul>
 
   <details>
     <summary>Cosa viene corretto</summary>
     <ul style="margin-top:8px;list-style:disc;padding-left:20px">
-      <li style="display:list-item;background:none;padding:2px 0;margin:0">Testo sempre allineato a sinistra (anche negli stili dentro i capitoli)</li>
+      <li style="display:list-item;background:none;padding:2px 0;margin:0">Sillabazione italiana: inseriti trattini “soft” in ogni parola da 5 lettere in su (minimo 2 lettere per lato), così il lettore può andare a capo con il trattino</li>
+      <li style="display:list-item;background:none;padding:2px 0;margin:0">Opzionale: testo allineato a sinistra (anche negli stili dentro i capitoli)</li>
       <li style="display:list-item;background:none;padding:2px 0;margin:0">Rimossi font e @font-face del libro: usa il font del lettore</li>
       <li style="display:list-item;background:none;padding:2px 0;margin:0">Spazi speciali (non separabile, sottile, em…) sostituiti da spazi normali; spazi a larghezza zero e trattini “soft” eliminati</li>
       <li style="display:list-item;background:none;padding:2px 0;margin:0">Rientri negativi e margini laterali eccessivi ridotti</li>
       <li style="display:list-item;background:none;padding:2px 0;margin:0">Lingua del libro impostata se mancante</li>
     </ul>
-    <p>Limite: se il firmware forza il giustificato a prescindere dal file, questa pagina non può impedirlo.</p>
+    <p>Limite: il firmware originale può ignorare i trattini “soft” e forzare il giustificato; in quel caso la sillabazione non ha effetto.</p>
   </details>
   <footer>Il file originale non viene mai modificato: scarichi una copia con suffisso <code>_X4</code>.</footer>
 </main>
 <script src="jszip.min.js"></script>
+<script src="hyphen-it.js"></script>
 <script src="fixer.js"></script>
 <script>
 (function () {
@@ -77,8 +88,9 @@
     try {
       if (!/\.epub$/i.test(file.name)) throw new Error('Non è un file .epub');
       var buf = await file.arrayBuffer();
-      var r = await X4Fixer.fixEpub(JSZip, buf);
-      var name = X4Fixer.outName(r.title, file.name);
+      var hy = document.getElementById('optHyph').checked, lf = document.getElementById('optLeft').checked;
+      var r = await X4Fixer.fixEpub(JSZip, buf, { hyphenate: hy, left: lf });
+      var name = X4Fixer.outName(r.title, file.name, hy ? '_sillabato' : '');
       var url = URL.createObjectURL(new Blob([r.data], { type: 'application/epub+zip' }));
       st.textContent = 'Pronto · ' + r.stats.files + ' capitoli sistemati, ' + r.stats.fontsRemoved + ' font rimossi';
       var a = document.createElement('a'); a.className = 'btn'; a.href = url; a.download = name; a.textContent = 'Scarica';

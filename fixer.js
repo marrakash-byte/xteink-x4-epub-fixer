@@ -4,6 +4,8 @@
   else root.X4Fixer = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
+  var root_hyph_default = (typeof self !== 'undefined' && self.X4Hyphen) || null;
+  var root_hyph = root_hyph_default;
   var SPACE_RE = /[\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g;
   var ZW_RE = /[\u00ad\u200b\u200c\u200d\u2060\ufeff]/g;
   var ENT_SPACE_RE = /&(?:nbsp|ensp|emsp|thinsp|hairsp|numsp|puncsp|MediumSpace|ThinSpace|VeryThinSpace|NoBreak|#160|#x0*a0|#8192|#8193|#8194|#8195|#8196|#8197|#8198|#8199|#8200|#8201|#8202|#8239|#8287|#12288|#x0*20(?:0[0-9a]|2f|5f)|#x3000);/gi;
@@ -12,10 +14,12 @@
   var FONTFAM_RE = /(?<![\w-])font-family\s*:[^;}]*;?/gi;
   var FONT_FILE_RE = /\.(ttf|otf|woff2?|eot)$/i;
 
-  var XTEINK_CSS =
-    '/* Aggiunto da Xteink X4 fixer */\n' +
-    'html, body, p, div, li, blockquote, dd, dt, td, th { text-align: left; }\n' +
-    '* { word-spacing: normal !important; letter-spacing: normal !important; text-justify: none; }\n';
+  var OPT = { left: false, hyphenate: true };
+  function xteinkCss() {
+    return '/* Aggiunto da Xteink X4 fixer */\n' +
+      (OPT.left ? 'html, body, p, div, li, blockquote, dd, dt, td, th { text-align: left; }\n' : '') +
+      '* { word-spacing: normal !important; letter-spacing: normal !important; text-justify: none; hyphens: manual; -webkit-hyphens: manual; }\n';
+  }
 
   function fmt(n) { return String(parseFloat(n.toPrecision(12))); }
 
@@ -41,7 +45,7 @@
     if (m) { imp = ' !important'; val = val.slice(0, m.index); }
     var p = prop.toLowerCase();
     if (p === 'text-align' || p === 'text-align-last') {
-      val = val.replace(/justify(?:-all)?/gi, 'left');
+      if (OPT.left) val = val.replace(/justify(?:-all)?/gi, 'left');
     } else if (p === 'text-indent') {
       var v = val.trim();
       var mm = /^(-?[\d.]+)(%|em|rem|pt|px)?$/.exec(v);
@@ -70,11 +74,41 @@
     return declSub(css);
   }
 
+  var LET = 'A-Za-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u00ff';
+  var RUN_RE = new RegExp('[' + LET + '\u2019\'\u02bc-]{5,}', 'g');
+  var ALPHA_RE = new RegExp('^[' + LET + ']+$');
+  function hyphWord(w) {
+    return w.split(/([\u2019'\u02bc-])/).map(function (p) {
+      return (p.length >= 5 && ALPHA_RE.test(p) && root_hyph) ? root_hyph.hyphenate(p).join('\u00ad') : p;
+    }).join('');
+  }
+  function hyphText(t) {
+    return t.replace(/\S+/g, function (c) {
+      if (/\d|:\/\/|www\.|@/.test(c)) return c;
+      return c.replace(RUN_RE, hyphWord);
+    });
+  }
+  function hyphenateHtml(h) {
+    var m = /<body\b/i.exec(h);
+    if (!m) return h;
+    var head = h.slice(0, m.index), body = h.slice(m.index), skip = 0, out = [];
+    body.split(/(<!--[\s\S]*?-->|<[^>]+>|&#?\w+;)/).forEach(function (t) {
+      if (t.charAt(0) === '<') {
+        var tl = t.toLowerCase();
+        if (/^<(script|style|title)\b/.test(tl)) skip++;
+        else if (/^<\/(script|style|title)/.test(tl)) skip = Math.max(0, skip - 1);
+        out.push(t);
+      } else if (t.charAt(0) === '&' || skip) out.push(t);
+      else out.push(hyphText(t));
+    });
+    return head + out.join('');
+  }
+
   function fixHtml(h, lang) {
     h = h.replace(ENT_SPACE_RE, ' ').replace(ENT_ZW_RE, '');
     h = h.replace(SPACE_RE, ' ').replace(ZW_RE, '');
     h = h.replace(/(<(?:p|div|li|blockquote|h[1-6])\b[^>]*>) +(?=[^<\s])/g, '$1');
-    h = h.replace(/(\salign\s*=\s*)(["'])\s*justify\s*\2/gi, '$1$2left$2');
+    if (OPT.left) h = h.replace(/(\salign\s*=\s*)(["'])\s*justify\s*\2/gi, '$1$2left$2');
     h = h.replace(/(\sstyle\s*=\s*)(["'])([\s\S]*?)\2/gi, function (_, a, q, body) {
       return a + q + declSub(body.replace(FONTFAM_RE, '')) + q;
     });
@@ -84,6 +118,7 @@
       if (!/\slang\s*=/.test(tag)) tag = tag.slice(0, -1) + ' lang="' + lang + '">';
       return tag;
     });
+    if (OPT.hyphenate && root_hyph) h = hyphenateHtml(h);
     return h;
   }
 
@@ -109,7 +144,10 @@
   function encode(s) { return new TextEncoder().encode(s); }
 
   /** JSZipLib: costruttore JSZip. input: ArrayBuffer/Uint8Array. */
-  async function fixEpub(JSZipLib, input) {
+  async function fixEpub(JSZipLib, input, opts) {
+    opts = opts || {};
+    OPT.left = !!opts.left; OPT.hyphenate = opts.hyphenate !== false;
+    root_hyph = opts.hyphenator || root_hyph_default;
     var zin = await JSZipLib.loadAsync(input);
     var names = Object.keys(zin.files).filter(function (n) { return !zin.files[n].dir; });
     var cont = zin.file('META-INF/container.xml');
@@ -177,15 +215,16 @@
       }
       zout.file(n, data, { compression: 'DEFLATE', date: D, createFolders: false });
     }
-    zout.file(cssName, XTEINK_CSS, { compression: 'DEFLATE', date: D, createFolders: false });
+    zout.file(cssName, xteinkCss(), { compression: 'DEFLATE', date: D, createFolders: false });
     var out = await zout.generateAsync({ type: 'uint8array', mimeType: 'application/epub+zip', compression: 'DEFLATE' });
     return { data: out, title: title, stats: stats };
   }
 
-  function outName(title, originalName) {
+  function outName(title, originalName, suffix) {
     var base = title || (originalName || 'libro').replace(/\.epub$/i, '');
     base = base.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim() || 'libro';
-    return base + '_X4.epub';
+    return base + '_X4' + (suffix || '') + '.epub';
   }
-  return { fixEpub: fixEpub, fixCss: fixCss, fixHtml: fixHtml, outName: outName };
+  function setOpts(o) { OPT.left = !!o.left; OPT.hyphenate = o.hyphenate !== false; if (o.hyphenator) root_hyph = o.hyphenator; }
+  return { fixEpub: fixEpub, fixCss: fixCss, fixHtml: fixHtml, outName: outName, setOpts: setOpts };
 });
